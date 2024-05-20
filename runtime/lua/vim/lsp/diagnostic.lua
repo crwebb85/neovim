@@ -258,6 +258,18 @@ local function handle_diagnostics(uri, client_id, diagnostics, is_pull, config)
   end
 
   vim.diagnostic.set(namespace, bufnr, diagnostic_lsp_to_vim(diagnostics, bufnr, client_id))
+
+  local client = vim.lsp.get_client_by_id(client_id)
+  --TODO use a more efficient function to determine if the buffer has diagnostics
+  local has_diagnostics = vim.diagnostic.count(bufnr, { namespace = namespace })[bufnr] ~= nil
+  if client ~= nil then
+    if has_diagnostics then
+      client.diagnostic_buffers[bufnr] = true
+    else
+      --buffer no longer has diagnostics for the given namespace
+      client.diagnostic_buffers[bufnr] = nil
+    end
+  end
 end
 
 --- |lsp-handler| for the method "textDocument/publishDiagnostics"

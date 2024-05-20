@@ -385,6 +385,7 @@ end
 local function on_client_exit(code, signal, client_id)
   local client = all_clients[client_id]
 
+  local namespace = vim.lsp.diagnostic.get_namespace(client_id)
   for bufnr in pairs(client.attached_buffers) do
     vim.schedule(function()
       if client and client.attached_buffers[bufnr] then
@@ -395,13 +396,23 @@ local function on_client_exit(code, signal, client_id)
         })
       end
 
-      local namespace = vim.lsp.diagnostic.get_namespace(client_id)
       vim.diagnostic.reset(namespace, bufnr)
       client.attached_buffers[bufnr] = nil
+      client.diagnostic_buffers[bufnr] = nil
 
       if #lsp.get_clients({ bufnr = bufnr, _uninitialized = true }) == 0 then
         reset_defaults(bufnr)
       end
+    end)
+  end
+
+  -- Reset diagnostics on the remaining buffers that were not attached to the
+  -- lsp. This can happen when a buffer has an diagnostic but the buffer is not
+  -- open or was closed
+  for bufnr in pairs(client.diagnostic_buffers) do
+    vim.schedule(function()
+      vim.diagnostic.reset(namespace, bufnr)
+      client.diagnostic_buffers[bufnr] = nil
     end)
   end
 
@@ -669,7 +680,7 @@ function lsp.buf_detach_client(bufnr, client_id)
   client.attached_buffers[bufnr] = nil
   util.buf_versions[bufnr] = nil
 
-  local namespace = lsp.diagnostic.get_namespace(client_id)
+  local namespace = lsp.diagnostic.get_namespace(client_id) --TODO figure out what scenario this code gets called
   vim.diagnostic.reset(namespace, bufnr)
 end
 

@@ -186,6 +186,9 @@ local validate = vim.validate
 ---
 --- @field attached_buffers table<integer,true>
 ---
+--- Set of buffers with client diagnostics including unattached buffers
+--- @field diagnostic_buffers table<integer,true>
+---
 --- Buffers that should be attached to upon initialize()
 --- @field package _buffers_to_attach table<integer,true>
 ---
@@ -456,6 +459,7 @@ function Client.create(config)
     _log_prefix = string.format('LSP[%s]', name),
     requests = {},
     attached_buffers = {},
+    diagnostic_buffers = {},
     server_capabilities = {},
     dynamic_capabilities = lsp._dynamic.new(id),
     commands = config.commands or {},
