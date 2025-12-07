@@ -345,12 +345,59 @@ pub fn build(b: *std.Build) !void {
     nvim_exe_step.dependOn(&nvim_exe_install.step);
 
     const gen_runtime = try runtime.nvim_gen_runtime(b, nlua0, funcs_data);
-    const runtime_install = b.addInstallDirectory(.{ .source_dir = gen_runtime.getDirectory(), .install_dir = .prefix, .install_subdir = "runtime/" });
+    const runtime_install = b.addInstallDirectory(.{ .source_dir = gen_runtime.getDirectory(), .install_dir = .prefix, .install_subdir = "share/nvim/runtime/" });
+
+    const ts_parsers = b.step("ts_parsers", "treesitter parsers");
+    const parser_c = b.dependency("treesitter_c", .{ .target = target, .optimize = optimize });
+    ts_parsers.dependOn(add_ts_parser(b, "c", parser_c.path("."), false, target, optimize));
+    const parser_markdown = b.dependency("treesitter_markdown", .{ .target = target, .optimize = optimize });
+    ts_parsers.dependOn(add_ts_parser(b, "markdown", parser_markdown.path("tree-sitter-markdown/"), true, target, optimize));
+    ts_parsers.dependOn(add_ts_parser(b, "markdown_inline", parser_markdown.path("tree-sitter-markdown-inline/"), true, target, optimize));
+    const parser_vim = b.dependency("treesitter_vim", .{ .target = target, .optimize = optimize });
+    ts_parsers.dependOn(add_ts_parser(b, "vim", parser_vim.path("."), true, target, optimize));
+    const parser_vimdoc = b.dependency("treesitter_vimdoc", .{ .target = target, .optimize = optimize });
+    ts_parsers.dependOn(add_ts_parser(b, "vimdoc", parser_vimdoc.path("."), false, target, optimize));
+    const parser_lua = b.dependency("treesitter_lua", .{ .target = target, .optimize = optimize });
+    ts_parsers.dependOn(add_ts_parser(b, "lua", parser_lua.path("."), true, target, optimize));
+    const parser_query = b.dependency("treesitter_query", .{ .target = target, .optimize = optimize });
+    ts_parsers.dependOn(add_ts_parser(b, "query", parser_query.path("."), false, target, optimize));
 
     const nvim = b.step("nvim", "build the editor");
 
     nvim.dependOn(&nvim_exe_install.step);
     nvim.dependOn(&runtime_install.step);
+    nvim.dependOn(ts_parsers);
+
+    if (is_windows) {
+        // xxd - hex dump utility (vendored from Vim)
+        const xxd_exe = b.addExecutable(.{
+            .name = "xxd",
+            .root_module = b.createModule(.{
+                .target = target,
+                .optimize = optimize,
+            }),
+        });
+        xxd_exe.addCSourceFile(.{ .file = b.path("src/xxd/xxd.c") });
+        xxd_exe.linkLibC();
+        nvim.dependOn(&b.addInstallArtifact(xxd_exe, .{}).step);
+
+        // tee - (vendored)
+        const tee_exe = b.addExecutable(.{
+            .name = "tee",
+            .root_module = b.createModule(.{
+                .target = target,
+                .optimize = optimize,
+            }),
+        });
+        tee_exe.addCSourceFile(.{ .file = b.path("src/tee/tee.c") });
+        tee_exe.linkLibC();
+        nvim.dependOn(&b.addInstallArtifact(tee_exe, .{}).step);
+
+        const win32_yank = b.dependency("win32_yank", .{});
+        const win32_yank_file_path = win32_yank.path("win32yank.exe");
+        const install_win32_yank_step = b.addInstallBinFile(win32_yank_file_path, "win32yank.exe");
+        nvim.dependOn(&install_win32_yank_step.step);
+    }
 
     const lua_dev_deps = b.dependency("lua_dev_deps", .{});
 
@@ -364,32 +411,6 @@ pub fn build(b: *std.Build) !void {
     test_deps.dependOn(test_fixture(b, "printargs-test", null, target, optimize, &flags));
     test_deps.dependOn(test_fixture(b, "printenv-test", null, target, optimize, &flags));
     test_deps.dependOn(test_fixture(b, "streams-test", libuv, target, optimize, &flags));
-
-    // xxd - hex dump utility (vendored from Vim)
-    const xxd_exe = b.addExecutable(.{
-        .name = "xxd",
-        .root_module = b.createModule(.{
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    xxd_exe.addCSourceFile(.{ .file = b.path("src/xxd/xxd.c") });
-    xxd_exe.linkLibC();
-    test_deps.dependOn(&b.addInstallArtifact(xxd_exe, .{}).step);
-
-    const parser_c = b.dependency("treesitter_c", .{ .target = target, .optimize = optimize });
-    test_deps.dependOn(add_ts_parser(b, "c", parser_c.path("."), false, target, optimize));
-    const parser_markdown = b.dependency("treesitter_markdown", .{ .target = target, .optimize = optimize });
-    test_deps.dependOn(add_ts_parser(b, "markdown", parser_markdown.path("tree-sitter-markdown/"), true, target, optimize));
-    test_deps.dependOn(add_ts_parser(b, "markdown_inline", parser_markdown.path("tree-sitter-markdown-inline/"), true, target, optimize));
-    const parser_vim = b.dependency("treesitter_vim", .{ .target = target, .optimize = optimize });
-    test_deps.dependOn(add_ts_parser(b, "vim", parser_vim.path("."), true, target, optimize));
-    const parser_vimdoc = b.dependency("treesitter_vimdoc", .{ .target = target, .optimize = optimize });
-    test_deps.dependOn(add_ts_parser(b, "vimdoc", parser_vimdoc.path("."), false, target, optimize));
-    const parser_lua = b.dependency("treesitter_lua", .{ .target = target, .optimize = optimize });
-    test_deps.dependOn(add_ts_parser(b, "lua", parser_lua.path("."), true, target, optimize));
-    const parser_query = b.dependency("treesitter_query", .{ .target = target, .optimize = optimize });
-    test_deps.dependOn(add_ts_parser(b, "query", parser_query.path("."), false, target, optimize));
 
     const unit_headers: ?[]const LazyPath = if (support_unittests) &(unittest_include_path ++ .{gen_headers.getDirectory()}) else null;
 
@@ -443,7 +464,12 @@ pub fn add_ts_parser(
     parser.addIncludePath(parser_dir.path(b, "src"));
     parser.linkLibC();
 
-    const parser_install = b.addInstallArtifact(parser, .{ .dest_sub_path = b.fmt("parser/{s}.so", .{name}) });
+    const t = target.result;
+    const os_tag = t.os.tag;
+    const is_windows = (os_tag == .windows);
+    const extension = if (is_windows) "dll" else "so";
+
+    const parser_install = b.addInstallLibFile(parser.getEmittedBin(), b.fmt("nvim/parser/{s}.{s}", .{ name, extension }));
     return &parser_install.step;
 }
 

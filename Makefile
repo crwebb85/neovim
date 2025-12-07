@@ -196,3 +196,9 @@ emmylua-check:
 	-emmylua_check runtime/lua \
 		--config .luarc.json \
 		--config .emmyrc.json
+
+zigbuild:
+	zig build nvim -Dluajit=true
+zigtest:
+	zig build test_nlua0 -Dluajit=true
+	zig build functionaltest -Dluajit=true
